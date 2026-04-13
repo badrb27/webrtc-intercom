@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Audio Test</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #0f0f1a;
+            color: #e0e0e0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        h1 { color: #4fc3f7; margin-bottom: 4px; }
+        .subtitle { color: #78909c; font-size: 13px; margin-bottom: 24px; }
+        .card {
+            background: #1e1e2e;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+            border: 1px solid #2a2a3e;
+        }
+        .card h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: #78909c; margin-bottom: 12px; }
+        input {
+            background: #12121e;
+            border: 1px solid #3a3a5e;
+            border-radius: 8px;
+            color: #e0e0e0;
+            padding: 10px 14px;
+            font-size: 15px;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        button {
+            background: #1565c0;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-size: 14px;
+            cursor: pointer;
+            margin-right: 8px;
+        }
+        button:hover { background: #1976d2; }
+        button:disabled { background: #37474f; cursor: not-allowed; }
+        button.danger { background: #c62828; }
+        button.danger:hover { background: #d32f2f; }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: bold;
+        }
+        .status-disconnected { background: #37474f; color: #90a4ae; }
+        .status-connecting { background: #e65100; color: #fff; }
+        .status-connected { background: #1b5e20; color: #a5d6a7; }
+        .status-calling { background: #4a148c; color: #ce93d8; }
+        .online-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .online-user {
+            background: #1b5e20;
+            color: #a5d6a7;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 13px;
+        }
+        .online-user.self { background: #1565c0; color: #90caf9; }
+        .log {
+            background: #12121e;
+            border-radius: 8px;
+            padding: 12px;
+            font-family: monospace;
+            font-size: 12px;
+            height: 200px;
+            overflow-y: auto;
+            margin-top: 8px;
+        }
+        .log-entry { margin-bottom: 4px; }
+        .log-entry.info { color: #64b5f6; }
+        .log-entry.success { color: #81c784; }
+        .log-entry.warning { color: #ffb74d; }
+        .log-entry.error { color: #e57373; }
+        #setup-section { }
+        #call-section { display: none; }
+        .timer { font-size: 32px; font-weight: bold; color: #4fc3f7; text-align: center; padding: 12px 0; }
+        .flex { display: flex; gap: 10px; align-items: center; }
+        .flex input { margin-bottom: 0; }
+    </style>
+</head>
+<body>
+
+<h1>WebRTC Audio Test</h1>
+<p class="subtitle">Family Intercom — WebRTC signaling test via ws://localhost:8080</p>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SETUP SECTION — shown before connecting to signaling server
+══════════════════════════════════════════════════════════════════════ -->
+<div id="setup-section">
+    <div class="card">
+        <h2>1. Connect to Signaling Server</h2>
+        <input id="user-id-input" type="text" placeholder="Enter your user ID (e.g. badr)" />
+        <input id="token-input" type="text" placeholder="JWT token (leave blank for test)" />
+        <button id="connect-btn" onclick="connectToServer()">Connect</button>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     CALL SECTION — shown after connecting
+══════════════════════════════════════════════════════════════════════ -->
+<div id="call-section">
+
+    <div class="card">
+        <h2>Status</h2>
+        <div>
+            WebSocket: <span id="ws-status" class="status-badge status-disconnected">Disconnected</span>
+            &nbsp;&nbsp;
+            WebRTC: <span id="rtc-status" class="status-badge status-disconnected">Idle</span>
+        </div>
+        <div id="call-timer" class="timer" style="display:none">00:00</div>
+    </div>
+
+    <div class="card">
+        <h2>Online Users</h2>
+        <div id="online-list" class="online-list">
+            <span style="color:#546e7a">Nobody else online yet...</span>
+        </div>
+    </div>
+
+    <div class="card" id="call-controls">
+        <h2>Make a Call</h2>
+        <div class="flex">
+            <input id="target-input" type="text" placeholder="Target user ID (e.g. mom)" />
+            <button id="call-btn" onclick="startCall()">Call</button>
+        </div>
+    </div>
+
+    <div class="card" id="active-call-card" style="display:none; border-color: #4fc3f7;">
+        <h2>Active Call</h2>
+        <p id="call-partner" style="margin-bottom:12px; font-size:16px;"></p>
+        <button class="danger" onclick="hangUp()">Hang Up</button>
+    </div>
+
+    <div class="card">
+        <h2>Event Log</h2>
+        <div id="log" class="log"></div>
+    </div>
+</div>
+
+<!-- Hidden audio element — plays remote audio from the peer -->
+<!--
+    WHY an <audio> element?
+    WebRTC gives us a MediaStream from the remote peer.
+    We attach that stream to an <audio> element's srcObject,
+    and the browser handles playback automatically.
+-->
+<audio id="remote-audio" autoplay playsinline></audio>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// WEBRTC CONCEPTS EXPLAINED
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// WebRTC allows browsers to communicate DIRECTLY (peer-to-peer) without
+// going through a server for the actual audio/video data.
+//
+// But first they need to "find each other" — this is called SIGNALING.
+// Our WebSocket server handles signaling (exchanging connection info).
+//
+// THE WEBRTC HANDSHAKE PROCESS:
+// ─────────────────────────────
+//
+// Caller (Mom's phone)          Server              Callee (Badr's PC)
+//      |                           |                        |
+//      |─── call-request ─────────>|──── call-request ─────>|
+//      |                           |                        | [auto-accepts]
+//      |                           |                        | creates RTCPeerConnection
+//      |                           |                        | gets microphone audio
+//      |                           |                        | creates SDP offer
+//      |<────────────── webrtc-offer ──────────────────────|
+//      | [receives offer]          |                        |
+//      | creates RTCPeerConnection |                        |
+//      | sets remote description   |                        |
+//      | gets microphone audio     |                        |
+//      | creates SDP answer        |                        |
+//      |──────────────── webrtc-answer ───────────────────>|
+//      |                           |                        | [sets remote description]
+//      |<──── ice-candidate ───────|──────────────────────|
+//      |──── ice-candidate ────────|─────────────────────>|
+//      |    (many ice candidates)  |  (many ice candidates)|
+//      |                           |                        |
+//      |<════ DIRECT P2P AUDIO CONNECTION ESTABLISHED ════>|
+//      |           (no longer goes through server)         |
+//
+//
+// KEY CONCEPTS:
+// ─────────────
+//
+// RTCPeerConnection:
+//   The main WebRTC object. Handles everything: codec negotiation,
+//   encryption, ICE, DTLS handshake, sending/receiving media.
+//
+// SDP (Session Description Protocol):
+//   A text format describing what media the peer can send/receive
+//   (codecs, formats, bandwidth, etc.) and network info.
+//   The "offer" is created by the caller, "answer" by the callee.
+//
+// ICE (Interactive Connectivity Establishment):
+//   The process of finding the best network path between two peers.
+//   ICE candidates are potential network addresses/ports to try.
+//   Types:
+//     - host: local network address (works on same LAN)
+//     - srflx: server-reflexive (your public IP, found via STUN)
+//     - relay: via TURN server (fallback when direct fails)
+//
+// STUN (Session Traversal Utilities for NAT):
+//   A server that tells you your public IP address.
+//   We use Google's free STUN server: stun:stun.l.google.com:19302
+//   This is how WebRTC works through home routers/NAT.
+//
+// DTLS + SRTP:
+//   WebRTC automatically encrypts all media with DTLS-SRTP.
+//   You don't have to do anything — it's mandatory.
+//
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Global state ──────────────────────────────────────────────────────────────
+
+let ws = null;               // WebSocket connection to signaling server
+let pc = null;               // RTCPeerConnection (the WebRTC connection)
+let localStream = null;      // Our microphone audio stream
+let myUserId = null;         // Our user ID on the signaling server
+let callPartner = null;      // User ID of the person we're in a call with
+let callTimerInterval = null; // Interval for updating the call duration display
+let callStartTime = null;    // When the call started (for duration calc)
+
+// ── Logging helper ─────────────────────────────────────────────────────────────
+
+function log(message, type = 'info') {
+    const logEl = document.getElementById('log');
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+    const time = new Date().toLocaleTimeString();
+    entry.textContent = `[${time}] ${message}`;
+    logEl.appendChild(entry);
+    logEl.scrollTop = logEl.scrollHeight; // Auto-scroll to bottom
+    console.log(`[${type.toUpperCase()}] ${message}`);
+}
+
+// ── Step 1: Connect to signaling server ───────────────────────────────────────
+
+function connectToServer() {
+    myUserId = document.getElementById('user-id-input').value.trim();
+    const token = document.getElementById('token-input').value.trim() || 'test-token';
+
+    if (!myUserId) {
+        alert('Please enter a user ID');
+        return;
+    }
+
+    const wsUrl = `ws://localhost:8080/ws/${myUserId}`;
+    log(`Connecting to ${wsUrl} as "${myUserId}"...`);
+
+    // Create WebSocket connection
+    ws = new WebSocket(wsUrl);
+
+    // ── WebSocket event handlers ───────────────────────────────────────────────
+
+    ws.onopen = () => {
+        // WebSocket connected — now we must send our JWT auth token
+        // The server gives us 5 seconds to authenticate
+        log('WebSocket connected! Sending auth token...', 'success');
+        ws.send(JSON.stringify({ type: 'auth', token: token }));
+        setWsStatus('connecting');
+    };
+
+    ws.onmessage = (event) => {
+        // All signaling messages come through here
+        const msg = JSON.parse(event.data);
+        handleSignalingMessage(msg);
+    };
+
+    ws.onclose = (event) => {
+        log(`WebSocket closed (code: ${event.code})`, 'warning');
+        setWsStatus('disconnected');
+        // If we were in a call, clean up
+        if (pc) cleanupCall();
+    };
+
+    ws.onerror = (error) => {
+        log('WebSocket error — is the server running?', 'error');
+    };
+}
+
+// ── Step 2: Handle incoming signaling messages ─────────────────────────────────
+
+async function handleSignalingMessage(msg) {
+    log(`← Received: ${msg.type}${msg.from ? ' from ' + msg.from : ''}`, 'info');
+
+    switch (msg.type) {
+
+        case 'auth-ok':
+            // Server confirmed our JWT is valid
+            log(`Authenticated as "${msg.user_id}"`, 'success');
+            setWsStatus('connected');
+            // Show the call UI
+            document.getElementById('setup-section').style.display = 'none';
+            document.getElementById('call-section').style.display = 'block';
+            break;
+
+        case 'presence':
+            // Server broadcasts this whenever anyone connects/disconnects
+            // msg.online = ["host", "user1", "user2", ...]
+            updateOnlineList(msg.online);
+            break;
+
+        case 'call-request':
+            // Someone wants to call us!
+            // In this test app, we auto-accept all calls
+            log(`Incoming call from "${msg.from}" — auto-accepting!`, 'success');
+            await handleIncomingCall(msg.from);
+            break;
+
+        case 'webrtc-offer':
+            // We received an SDP offer from the other peer
+            // This means: "here's what I can do, please send back what you can do"
+            log(`Received WebRTC offer from "${msg.from}"`, 'info');
+            await handleOffer(msg);
+            break;
+
+        case 'webrtc-answer':
+            // We received an SDP answer to our offer
+            // Now both sides know each other's capabilities
+            log(`Received WebRTC answer from "${msg.from}"`, 'info');
+            await handleAnswer(msg);
+            break;
+
+        case 'ice-candidate':
+            // We received a network path candidate from the other peer
+            // We add it to our RTCPeerConnection so it can try connecting
+            log(`Received ICE candidate from "${msg.from}"`, 'info');
+            await handleIceCandidate(msg);
+            break;
+
+        case 'hang-up':
+            // Other side hung up
+            log(`"${msg.from}" hung up`, 'warning');
+            cleanupCall();
+            break;
+
+        case 'error':
+            log(`Server error: ${msg.message}`, 'error');
+            break;
+
+        default:
+            log(`Unknown message type: ${msg.type}`, 'warning');
+    }
+}
+
+// ── Step 3a: Caller side — start a call ───────────────────────────────────────
+
+async function startCall() {
+    const target = document.getElementById('target-input').value.trim();
+    if (!target) { alert('Enter a target user ID'); return; }
+    if (!ws || ws.readyState !== WebSocket.OPEN) { alert('Not connected to server'); return; }
+    if (pc) { alert('Already in a call'); return; }
+
+    callPartner = target;
+    log(`Calling "${target}"...`, 'info');
+
+    // Send call-request to target via signaling server
+    // The server will forward this to the target user
+    sendSignal({ type: 'call-request', target: target });
+
+    // Now we wait for the target to auto-accept and send us a WebRTC offer
+    // (In our protocol, the CALLEE creates the offer — this is a design choice)
+    setRtcStatus('calling');
+    showActiveCallCard(target);
+}
+
+// ── Step 3b: Callee side — handle incoming call ────────────────────────────────
+
+async function handleIncomingCall(fromUserId) {
+    callPartner = fromUserId;
+    showActiveCallCard(fromUserId);
+
+    // ────────────────────────────────────────────────────────────────────────
+    // CREATE RTCPeerConnection
+    // ────────────────────────────────────────────────────────────────────────
+    // The configuration object specifies ICE servers.
+    // ICE servers help peers discover each other across NAT/firewalls.
+    //
+    // STUN server: tells you your public IP address
+    // TURN server: relays traffic if direct connection fails (we don't have one yet)
+    //
+    const config = {
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+    };
+    pc = new RTCPeerConnection(config);
+    log('Created RTCPeerConnection with STUN servers', 'info');
+
+    // ────────────────────────────────────────────────────────────────────────
+    // GET MICROPHONE ACCESS
+    // ────────────────────────────────────────────────────────────────────────
+    // getUserMedia() prompts user for permission to use mic/camera
+    // We only need audio for this intercom
+    //
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        log('Got microphone access', 'success');
+    } catch (err) {
+        log(`Failed to get microphone: ${err.message}`, 'error');
+        cleanupCall();
+        return;
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // ADD LOCAL AUDIO TRACKS TO PEER CONNECTION
+    // ────────────────────────────────────────────────────────────────────────
+    // Each "track" is an audio or video stream.
+    // By adding our mic track, we tell WebRTC to send it to the remote peer.
+    //
+    localStream.getTracks().forEach(track => {
+        pc.addTrack(track, localStream);
+        log(`Added local ${track.kind} track to peer connection`, 'info');
+    });
+
+    // ────────────────────────────────────────────────────────────────────────
+    // LISTEN FOR REMOTE AUDIO TRACKS
+    // ────────────────────────────────────────────────────────────────────────
+    // When the remote peer adds their audio track, this event fires.
+    // We attach it to our <audio> element so we can hear them.
+    //
+    pc.ontrack = (event) => {
+        log('Received remote audio track!', 'success');
+        const remoteAudio = document.getElementById('remote-audio');
+        // event.streams[0] is the remote MediaStream containing their audio
+        remoteAudio.srcObject = event.streams[0];
+        remoteAudio.play().catch(e => log(`Audio play failed: ${e.message}`, 'error'));
+    };
+
+    // ────────────────────────────────────────────────────────────────────────
+    // ICE CANDIDATE GATHERING
+    // ────────────────────────────────────────────────────────────────────────
+    // As WebRTC discovers potential network paths (ICE candidates),
+    // we forward them to the remote peer via the signaling server.
+    // The remote peer does the same for us.
+    // WebRTC will try all candidates and pick the best connection path.
+    //
+    pc.onicecandidate = (event) => {
+        if (event.candidate) {
+            // Found a new ICE candidate — send it to the remote peer
+            log(`New ICE candidate: ${event.candidate.type} (${event.candidate.protocol})`, 'info');
+            sendSignal({
+                type: 'ice-candidate',
+                target: callPartner,
+                candidate: event.candidate.toJSON()
+            });
+        } else {
+            // null candidate means ICE gathering is complete
+            log('ICE gathering complete', 'info');
+        }
+    };
+
+    // ────────────────────────────────────────────────────────────────────────
+    // ICE CONNECTION STATE CHANGES
+    // ────────────────────────────────────────────────────────────────────────
+    // This tells us the status of the peer-to-peer connection attempt.
+    // States: new → checking → connected → (failed/disconnected)
+    //
+    pc.oniceconnectionstatechange = () => {
+        const state = pc.iceConnectionState;
+        log(`ICE connection state: ${state}`, state === 'connected' ? 'success' : 'info');
+
+        if (state === 'connected' || state === 'completed') {
+            // WebRTC is connected! Audio should be flowing peer-to-peer.
+            setRtcStatus('connected');
+            startCallTimer();
+        } else if (state === 'failed') {
+            log('ICE connection FAILED — no viable network path found', 'error');
+            log('Tip: Both devices need internet access to use STUN', 'warning');
+            cleanupCall();
+        } else if (state === 'disconnected') {
+            log('ICE connection disconnected (network issue?)', 'warning');
+        }
+    };
+
+    // Connection state (higher level than ICE)
+    pc.onconnectionstatechange = () => {
+        log(`WebRTC connection state: ${pc.connectionState}`, 'info');
+    };
+
+    // ────────────────────────────────────────────────────────────────────────
+    // CREATE SDP OFFER
+    // ────────────────────────────────────────────────────────────────────────
+    // The offer is an SDP (Session Description Protocol) document that says:
+    // "I want to send you audio. Here are the codecs I support.
+    //  Here are my encryption keys. Here's my media fingerprint."
+    //
+    // In our protocol: CALLEE creates the offer (unusual but valid)
+    // This way the callee can include their audio track in the offer.
+    //
+    const offer = await pc.createOffer();
+    log('Created SDP offer', 'info');
+
+    // ────────────────────────────────────────────────────────────────────────
+    // SET LOCAL DESCRIPTION
+    // ────────────────────────────────────────────────────────────────────────
+    // We must set our own SDP as the "local description" before sending it.
+    // This finalizes the codec and encryption settings on our side.
+    //
+    await pc.setLocalDescription(offer);
+    log('Set local description (offer)', 'info');
+
+    // Send the offer to the caller via signaling server
+    sendSignal({
+        type: 'webrtc-offer',
+        target: callPartner,
+        sdp: pc.localDescription
+    });
+    log(`Sent WebRTC offer to "${callPartner}"`, 'success');
+
+    setRtcStatus('connecting');
+}
+
+// ── Step 4: Caller receives offer, creates answer ─────────────────────────────
+
+async function handleOffer(msg) {
+    // We (the caller) just received an offer from the callee.
+    // Now we need to:
+    //   1. Create RTCPeerConnection
+    //   2. Get our microphone
+    //   3. Set remote description (the offer we received)
+    //   4. Create an answer
+    //   5. Set local description (the answer)
+    //   6. Send the answer back
+
+    const config = {
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+    };
+    pc = new RTCPeerConnection(config);
+
+    // Same setup as callee: get mic, add tracks, listen for remote track, ICE candidates
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        log('Got microphone access', 'success');
+    } catch (err) {
+        log(`Failed to get microphone: ${err.message}`, 'error');
+        cleanupCall();
+        return;
+    }
+
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+    pc.ontrack = (event) => {
+        log('Received remote audio track!', 'success');
+        document.getElementById('remote-audio').srcObject = event.streams[0];
+        document.getElementById('remote-audio').play().catch(e => {});
+    };
+
+    pc.onicecandidate = (event) => {
+        if (event.candidate) {
+            log(`New ICE candidate: ${event.candidate.type}`, 'info');
+            sendSignal({ type: 'ice-candidate', target: callPartner, candidate: event.candidate.toJSON() });
+        }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+        const state = pc.iceConnectionState;
+        log(`ICE state: ${state}`, state === 'connected' ? 'success' : 'info');
+        if (state === 'connected' || state === 'completed') {
+            setRtcStatus('connected');
+            startCallTimer();
+        } else if (state === 'failed') {
+            log('ICE FAILED', 'error');
+            cleanupCall();
+        }
+    };
+
+    // ────────────────────────────────────────────────────────────────────────
+    // SET REMOTE DESCRIPTION (the offer we received)
+    // ────────────────────────────────────────────────────────────────────────
+    // This tells our RTCPeerConnection what the remote peer wants to send.
+    // Must be set BEFORE creating our answer.
+    //
+    await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+    log('Set remote description (offer)', 'info');
+
+    // ────────────────────────────────────────────────────────────────────────
+    // CREATE AND SEND ANSWER
+    // ────────────────────────────────────────────────────────────────────────
+    // The answer says "yes, I can do those codecs, here are my keys, let's go"
+    //
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    log('Created SDP answer', 'info');
+
+    sendSignal({ type: 'webrtc-answer', target: callPartner, sdp: pc.localDescription });
+    log(`Sent WebRTC answer to "${callPartner}"`, 'success');
+
+    setRtcStatus('connecting');
+}
+
+// ── Step 5: Callee receives answer ────────────────────────────────────────────
+
+async function handleAnswer(msg) {
+    // We (the callee) receive the answer from the caller.
+    // Set it as our remote description — now both sides know each other.
+    // ICE candidates are being exchanged concurrently.
+    //
+    if (!pc) { log('Got answer but no peer connection!', 'error'); return; }
+    await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+    log('Set remote description (answer) — waiting for ICE...', 'success');
+}
+
+// ── Step 6: Handle incoming ICE candidates ────────────────────────────────────
+
+async function handleIceCandidate(msg) {
+    // The remote peer found a network path — try it!
+    // WebRTC will test all candidates and use the best working path.
+    //
+    if (!pc) { log('Got ICE candidate but no peer connection!', 'error'); return; }
+
+    try {
+        // RTCIceCandidate wraps the candidate data
+        await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+        log('Added ICE candidate', 'info');
+    } catch (err) {
+        log(`Failed to add ICE candidate: ${err.message}`, 'error');
+    }
+}
+
+// ── Hang up ────────────────────────────────────────────────────────────────────
+
+function hangUp() {
+    if (callPartner && ws && ws.readyState === WebSocket.OPEN) {
+        sendSignal({ type: 'hang-up', target: callPartner });
+    }
+    cleanupCall();
+}
+
+function cleanupCall() {
+    log('Cleaning up call...', 'info');
+
+    // Stop call timer
+    if (callTimerInterval) {
+        clearInterval(callTimerInterval);
+        callTimerInterval = null;
+    }
+
+    // Stop local audio tracks (releases mic)
+    if (localStream) {
+        localStream.getTracks().forEach(track => {
+            track.stop();
+            log(`Stopped local ${track.kind} track`, 'info');
+        });
+        localStream = null;
+    }
+
+    // Close peer connection
+    if (pc) {
+        pc.close();
+        pc = null;
+        log('Closed RTCPeerConnection', 'info');
+    }
+
+    // Clear remote audio
+    document.getElementById('remote-audio').srcObject = null;
+
+    callPartner = null;
+    setRtcStatus('disconnected');
+    hideActiveCallCard();
+    document.getElementById('call-timer').style.display = 'none';
+}
+
+// ── Signaling helper ───────────────────────────────────────────────────────────
+
+function sendSignal(msg) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        log(`Sending: ${msg.type}${msg.target ? ' to ' + msg.target : ''}`, 'info');
+        ws.send(JSON.stringify(msg));
+    } else {
+        log('Cannot send — WebSocket not connected', 'error');
+    }
+}
+
+// ── UI helpers ─────────────────────────────────────────────────────────────────
+
+function setWsStatus(status) {
+    const el = document.getElementById('ws-status');
+    el.className = `status-badge status-${status}`;
+    const labels = { disconnected: 'Disconnected', connecting: 'Authenticating...', connected: 'Connected' };
+    el.textContent = labels[status] || status;
+}
+
+function setRtcStatus(status) {
+    const el = document.getElementById('rtc-status');
+    el.className = `status-badge status-${status}`;
+    const labels = { disconnected: 'Idle', connecting: 'Connecting...', connected: 'Connected', calling: 'Ringing...' };
+    el.textContent = labels[status] || status;
+}
+
+function updateOnlineList(users) {
+    const el = document.getElementById('online-list');
+    if (!users || users.length === 0) {
+        el.innerHTML = '<span style="color:#546e7a">Nobody online</span>';
+        return;
+    }
+    el.innerHTML = users.map(uid => {
+        const isSelf = uid === myUserId;
+        return `<span class="online-user${isSelf ? ' self' : ''}">${uid}${isSelf ? ' (you)' : ''}</span>`;
+    }).join('');
+}
+
+function showActiveCallCard(partner) {
+    document.getElementById('active-call-card').style.display = 'block';
+    document.getElementById('call-controls').style.display = 'none';
+    document.getElementById('call-partner').textContent = `Call with: ${partner}`;
+}
+
+function hideActiveCallCard() {
+    document.getElementById('active-call-card').style.display = 'none';
+    document.getElementById('call-controls').style.display = 'block';
+}
+
+function startCallTimer() {
+    callStartTime = Date.now();
+    document.getElementById('call-timer').style.display = 'block';
+    callTimerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - callStartTime) / 1000);
+        const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
+        const secs = String(elapsed % 60).padStart(2, '0');
+        document.getElementById('call-timer').textContent = `${mins}:${secs}`;
+    }, 1000);
+}
+
+// Allow pressing Enter in user ID input to connect
+document.getElementById('user-id-input')?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') connectToServer();
+});
+</script>
+
+</body>
+</html>

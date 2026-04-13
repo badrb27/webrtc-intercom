@@ -1,0 +1,16 @@
+{
+  "_comment": "Copy this file to config.json and fill in your values.",
+  "serverUrl": "ws://localhost:8080/ws/host",
+  "httpUrl": "http://localhost:8080",
+  "userId": "host",
+  "username": "host",
+  "password": "your-password-here",
+  "totp_secret": "YOUR_TOTP_SECRET_FROM_CREATE_USER",
+  "allowedCallers": [
+    "user1",
+    "user2"
+  ],
+  "autoAccept": false,
+  "cameraDefault": true,
+  "dnd": false
+}

@@ -1,0 +1,37 @@
+# ── Secrets & credentials ─────────────────────────────────────────────────────
+server/.env
+desktop/config.json
+config.yml
+
+# ── Runtime databases & logs ──────────────────────────────────────────────────
+server/users.db
+server/server.log
+desktop/connections.log
+desktop/cloudflared.log
+*.log
+
+# ── Build output ──────────────────────────────────────────────────────────────
+parent-app/dist/
+
+# ── Dependencies ──────────────────────────────────────────────────────────────
+node_modules/
+parent-app/node_modules/
+desktop/node_modules/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+server/venv/
+server/.venv/
+
+# ── IDE & OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# ── Claude Code internal (not project source) ─────────────────────────────────
+.claude/

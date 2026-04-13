@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Family Intercom Settings</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #e0e0e0; padding: 20px; }
+        h1 { color: #4fc3f7; margin-bottom: 20px; font-size: 18px; }
+        .section { background: #12121e; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+        .section h2 { font-size: 13px; text-transform: uppercase; color: #78909c; margin-bottom: 12px; letter-spacing: 1px; }
+        label { display: block; font-size: 13px; color: #90a4ae; margin-bottom: 4px; margin-top: 10px; }
+        input[type="text"], input[type="password"], textarea {
+            width: 100%; padding: 8px 12px; border-radius: 6px;
+            border: 1px solid #2a2a3e; background: #1e1e2e; color: #e0e0e0;
+            font-size: 14px;
+        }
+        .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1a1a2e; }
+        .toggle-row:last-child { border-bottom: none; }
+        .toggle { position: relative; width: 44px; height: 24px; }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute; cursor: pointer; inset: 0;
+            background: #37474f; border-radius: 24px; transition: 0.2s;
+        }
+        .slider:before {
+            content: ""; position: absolute; height: 18px; width: 18px;
+            left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.2s;
+        }
+        input:checked + .slider { background: #1565c0; }
+        input:checked + .slider:before { transform: translateX(20px); }
+        button {
+            padding: 10px 20px; border: none; border-radius: 8px;
+            cursor: pointer; font-size: 14px; font-weight: bold;
+        }
+        .btn-save { background: #1565c0; color: white; margin-right: 8px; }
+        .btn-save:hover { background: #1976d2; }
+        .log-area { background: #0a0a0f; border-radius: 6px; padding: 10px; font-family: monospace; font-size: 11px; height: 150px; overflow-y: auto; color: #64b5f6; margin-top: 8px; white-space: pre-wrap; }
+        .saved-msg { color: #81c784; font-size: 13px; margin-top: 8px; display: none; }
+    </style>
+</head>
+<body>
+    <h1>Family Intercom Settings</h1>
+
+    <div class="section">
+        <h2>Connection</h2>
+        <label>Server URL (WebSocket)</label>
+        <input type="text" id="serverUrl" placeholder="ws://localhost:8080/ws/host" />
+        <label>Your User ID</label>
+        <input type="text" id="userId" placeholder="host" />
+        <label>Username (for login)</label>
+        <input type="text" id="username" placeholder="host" />
+        <label>Password</label>
+        <input type="password" id="password" placeholder="Leave blank to keep current" />
+    </div>
+
+    <div class="section">
+        <h2>Behavior</h2>
+        <div class="toggle-row">
+            <span>Do Not Disturb (DND)</span>
+            <label class="toggle"><input type="checkbox" id="dnd" /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+            <span>Auto-Accept Calls</span>
+            <label class="toggle"><input type="checkbox" id="autoAccept" /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+            <span>Camera On by Default</span>
+            <label class="toggle"><input type="checkbox" id="cameraDefault" /><span class="slider"></span></label>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Allowed Callers</h2>
+        <label>User IDs (one per line)</label>
+        <textarea id="allowedCallers" rows="4" placeholder="mom&#10;dad"></textarea>
+    </div>
+
+    <button class="btn-save" onclick="saveSettings()">Save Settings</button>
+    <div class="saved-msg" id="saved-msg">✓ Settings saved!</div>
+
+    <div class="section" style="margin-top:16px">
+        <h2>Connection Log</h2>
+        <div class="log-area" id="log-area">Loading...</div>
+    </div>
+
+    <script>
+    const { ipcRenderer } = require('electron');
+    let currentConfig = {};
+
+    ipcRenderer.on('load-config', (event, config) => {
+        currentConfig = config;
+        document.getElementById('serverUrl').value = config.serverUrl || '';
+        document.getElementById('userId').value = config.userId || '';
+        document.getElementById('username').value = config.username || '';
+        document.getElementById('dnd').checked = config.dnd || false;
+        document.getElementById('autoAccept').checked = config.autoAccept !== false;
+        document.getElementById('cameraDefault').checked = config.cameraDefault || false;
+        document.getElementById('allowedCallers').value = (config.allowedCallers || []).join('\n');
+    });
+
+    ipcRenderer.on('config-saved', () => {
+        const msg = document.getElementById('saved-msg');
+        msg.style.display = 'block';
+        setTimeout(() => msg.style.display = 'none', 2000);
+    });
+
+    async function saveSettings() {
+        const password = document.getElementById('password').value;
+        const newConfig = {
+            ...currentConfig,
+            serverUrl: document.getElementById('serverUrl').value.trim(),
+            userId: document.getElementById('userId').value.trim(),
+            username: document.getElementById('username').value.trim(),
+            dnd: document.getElementById('dnd').checked,
+            autoAccept: document.getElementById('autoAccept').checked,
+            cameraDefault: document.getElementById('cameraDefault').checked,
+            allowedCallers: document.getElementById('allowedCallers').value
+                .split('\n').map(s => s.trim()).filter(Boolean)
+        };
+        if (password) newConfig.password = password;
+        ipcRenderer.send('save-config', newConfig);
+    }
+
+    // Load log
+    ipcRenderer.invoke('get-log').then(log => {
+        document.getElementById('log-area').textContent = log || 'No entries yet.';
+    });
+    </script>
+</body>
+</html>

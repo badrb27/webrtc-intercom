@@ -1,0 +1,14 @@
+# Copy this file to config.yml (in C:\Users\YOUR_USERNAME\.cloudflared\)
+# Replace the placeholders with your actual tunnel ID and domain.
+#
+# To get your tunnel ID:
+#   cloudflared tunnel create intercom
+#   (outputs a UUID like a1b2c3d4-e5f6-7890-abcd-ef1234567890)
+
+tunnel: YOUR-TUNNEL-ID-HERE
+credentials-file: C:\Users\YOUR_USERNAME\.cloudflared\YOUR-TUNNEL-ID.json
+
+ingress:
+  - hostname: intercom.yourdomain.com
+    service: http://localhost:8080
+  - service: http_status:404
