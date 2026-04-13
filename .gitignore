@@ -32,6 +32,3 @@ server/.venv/
 Thumbs.db
 *.swp
 *.swo
-
-# ── Claude Code internal (not project source) ─────────────────────────────────
-.claude/
